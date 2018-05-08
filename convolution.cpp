@@ -6,18 +6,18 @@ using namespace std;
 
 //Define the parameters if not defined externally
 #ifndef Sy
-  #define Sy 1
-  #define Sx 1
+#define Sy 1
+#define Sx 1
 #endif
 
 #ifndef Tnn
-  //Tiling Sizes
-  #define Tnn 32
-  #define Tn  16
-  #define Ti  16
-  
-  #define Ty  8
-  #define Tx  8
+//Tiling Sizes
+#define Tnn 32
+#define Tn  16
+#define Ti  16
+
+#define Ty  8
+#define Tx  8
 #endif
 
 #define NYPAD (Ny+Ky)
@@ -34,34 +34,39 @@ VTYPE  (*neuron_i)[NYPAD][NXPAD][Ni];
 VTYPE  (*neuron_n)[NYSCL][NXSCL][Nn];
 VTYPE (*neuron_n2)[NYSCL][NXSCL][Nn];
 
-void fill_convolution_shared_simple(VTYPE (&synapse)[Ky][Kx][Nn][Ni], 
+void fill_convolution_shared_simple(VTYPE (&synapse)[Ky][Kx][Nn][Ni],
                                     VTYPE (&neuron_i)[NYPAD][NXPAD][Ni]) {
-  for(int yy = 0; yy < Ky; ++yy) {
-    for(int xx = 0; xx < Kx; ++xx) {
-      for(int nn = 0; nn < Nn; ++nn) {
-        for(int ni = 0; ni < Ni; ++ni) {
+  for (int yy = 0; yy < Ky; ++yy) {
+    for (int xx = 0; xx < Kx; ++xx) {
+      for (int nn = 0; nn < Nn; ++nn) {
+        for (int ni = 0; ni < Ni; ++ni) {
           synapse[yy][xx][nn][ni] = static_cast <float> (rand()) / static_cast <float> (RAND_MAX) - 0.5f;
-        } } } }
-  for(int yy = 0; yy < NYPAD; ++yy) {
-    for(int xx = 0; xx < NXPAD; ++xx) {      
-      for(int ni = 0; ni < Ni; ++ni) {
+        }
+      }
+    }
+  }
+  for (int yy = 0; yy < NYPAD; ++yy) {
+    for (int xx = 0; xx < NXPAD; ++xx) {
+      for (int ni = 0; ni < Ni; ++ni) {
         neuron_i[yy][xx][ni] = static_cast <float> (rand()) / static_cast <float> (RAND_MAX) - 0.5f;
-  }  }  }
+      }
+    }
+  }
 }
 
-std::pair<int,int> convolution_layer_blocked(
-                              VTYPE (&synapse)[Ky][Kx][Nn][Ni], 
-                              VTYPE (&neuron_i)[NYPAD][NXPAD][Ni], 
-                              VTYPE (&neuron_n)[NYSCL][NXSCL][Nn]) {
-  int c1=0,c2=0;
-  VTYPE sum[Nn]={0};
+std::pair<int, int> convolution_layer_blocked(
+  VTYPE (&synapse)[Ky][Kx][Nn][Ni],
+  VTYPE (&neuron_i)[NYPAD][NXPAD][Ni],
+  VTYPE (&neuron_n)[NYSCL][NXSCL][Nn]) {
+  int c1 = 0, c2 = 0;
+  VTYPE sum[Nn] = {0};
 
   for (int yy = 0; yy < Ny; yy += Ty) {
     for (int xx = 0; xx < Nx; xx += Tx) {
       for (int nnn = 0; nnn < Nn; nnn += Tnn) {
-        int yout = yy/Sy;
+        int yout = yy / Sy;
         for (int y = yy; y < yy + Ty; y += Sy) { // tiling for y;
-          int xout = xx/Sx;
+          int xout = xx / Sx;
 
           for (int x = xx; x < xx + Tx; x += Sx) { // tiling for x;
 
@@ -76,15 +81,15 @@ std::pair<int,int> convolution_layer_blocked(
                   int ii = 0;
                   VTYPE sum_sc;
 
-                  for (; ii < Ni -Ti+1; ii += Ti) {
+                  for (; ii < Ni - Ti + 1; ii += Ti) {
                     for (int n = nn; n < nn + Tn; n++) {
-                      sum_sc=0;
+                      sum_sc = 0;
                       for (int i = ii; i < ii + Ti; i++) {
                         VTYPE sv = synapse[ky][kx][n][i];
                         VTYPE nv = neuron_i[ky + y][kx + x][i];
-                        sum_sc+=sv*nv;
+                        sum_sc += sv * nv;
                       }
-                      sum[n]+=sum_sc;
+                      sum[n] += sum_sc;
                     }
                   }
                 }
@@ -95,7 +100,7 @@ std::pair<int,int> convolution_layer_blocked(
                 neuron_n[yout][xout][n] = transfer(sum[n]);
               }
             }
-            xout++; 
+            xout++;
           }
           yout++;
         }
@@ -104,10 +109,10 @@ std::pair<int,int> convolution_layer_blocked(
   }
 }
 
-void  convolution_layer(VTYPE (&synapse)[Ky][Kx][Nn][Ni], 
-                               VTYPE (&neuron_i)[NYPAD][NXPAD][Ni], 
-                               VTYPE (&neuron_n)[NYSCL][NXSCL][Nn]) {
-  VTYPE sum[Nn]={0};
+void  convolution_layer(VTYPE (&synapse)[Ky][Kx][Nn][Ni],
+                        VTYPE (&neuron_i)[NYPAD][NXPAD][Ni],
+                        VTYPE (&neuron_n)[NYSCL][NXSCL][Nn]) {
+  VTYPE sum[Nn] = {0};
 
   // — Original code — (excluding nn, ii loops)
   int yout = 0;
@@ -116,7 +121,7 @@ void  convolution_layer(VTYPE (&synapse)[Ky][Kx][Nn][Ni],
     for (int x = 0; x < Ny; x += Sx) { // tiling for x;
       for (int nn = 0; nn < Nn; nn += Tn) {
         for (int n = nn; n < nn + Tn; n++) {
-          sum[n]=0;
+          sum[n] = 0;
         }
 
         // sliding window;
@@ -126,13 +131,13 @@ void  convolution_layer(VTYPE (&synapse)[Ky][Kx][Nn][Ni],
               for (int i = 0; i < Ni; i++) {
                 VTYPE sv = synapse[ky][kx][n][i];
                 VTYPE nv = neuron_i[ky + y][kx + x][i];
-                sum[n]+=sv*nv;
+                sum[n] += sv * nv;
               }
         for (int n = nn; n < nn + Tn; n++) {
           neuron_n[yout][xout][n] = transfer(sum[n]);
         }
       }
-      xout++; 
+      xout++;
     }
     yout++;
   }
@@ -144,34 +149,43 @@ void  convolution_layer(VTYPE (&synapse)[Ky][Kx][Nn][Ni],
 int main(const int argc, const char** argv) {
   cout << "allocating memory\n";
 
-  synapse   = (VTYPE (*)[Ky][Kx][Nn][Ni])  aligned_malloc(64,  SYNAPSE_SIZE*sizeof(VTYPE));
-  neuron_i  = (VTYPE (*)[NYPAD][NXPAD][Ni])aligned_malloc(64,NYPAD*NXPAD*Ni*sizeof(VTYPE));
-  neuron_n  = (VTYPE (*)[NYSCL][NXSCL][Nn])aligned_malloc(64,NYSCL*NXSCL*Nn*sizeof(VTYPE));
-  neuron_n2 = (VTYPE (*)[NYSCL][NXSCL][Nn])aligned_malloc(64,NYSCL*NXSCL*Nn*sizeof(VTYPE));
+  synapse   = (VTYPE (*)[Ky][Kx][Nn][Ni])  aligned_malloc(64,  SYNAPSE_SIZE * sizeof(VTYPE));
+  neuron_i  = (VTYPE (*)[NYPAD][NXPAD][Ni])aligned_malloc(64, NYPAD * NXPAD * Ni * sizeof(VTYPE));
+  neuron_n  = (VTYPE (*)[NYSCL][NXSCL][Nn])aligned_malloc(64, NYSCL * NXSCL * Nn * sizeof(VTYPE));
+  neuron_n2 = (VTYPE (*)[NYSCL][NXSCL][Nn])aligned_malloc(64, NYSCL * NXSCL * Nn * sizeof(VTYPE));
+  neuron_cuda = (VTYPE (*)[NYSCL][NXSCL][Nn])aligned_malloc(64, NYSCL * NXSCL * Nn * sizeof(VTYPE));
 
   cout << "initializing arrays\n";
 
-  fill_convolution_shared_simple(*synapse,*neuron_i);
+  fill_convolution_shared_simple(*synapse, *neuron_i);
 
   cout << "starting computation\n";
 
   //Simple Version
   begin_roi();
-  convolution_layer(*synapse,*neuron_i,*neuron_n);
+  convolution_layer(*synapse, *neuron_i, *neuron_n);
   end_roi();
 
-  cout << "simple version complete!\n";  
+  cout << "simple version complete!\n";
 
 
   //Blocked Version
   begin_roi();
-  convolution_layer_blocked(*synapse,*neuron_i,*neuron_n2);
+  convolution_layer_blocked(*synapse, *neuron_i, *neuron_n2);
   end_roi();
 
+  cout << "blocked computation complete!\n";
+  compare((VTYPE*)*neuron_n, (VTYPE*)*neuron_n2, NYSCL * NXSCL * Nn);
 
-  cout << "blocked computation complete!\n";  
 
-  compare((VTYPE*)*neuron_n,(VTYPE*)*neuron_n2,NYSCL*NXSCL*Nn);
+  //Cuda version
+  begin_roi();
+  //TODO: Add cuda implementation of the layer.
+  end_roi();
+
+  cout << "CUDA version complete!\n";
+  compare((VTYPE*)*neuron_n, (VTYPE*)*neuron_cuda, NYSCL * NXSCL * Nn);
+
 
   cout << "done\n";
 }
