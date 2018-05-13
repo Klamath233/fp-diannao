@@ -78,20 +78,36 @@ void classifier_layer_blocked(VTYPE (&synapse)[Nn][Ni], VTYPE (&neuron_i)[Ni],
 
 __global__ void classifier_layer_kernel(VTYPE (&synapse)[Nn][Ni], VTYPE (&neuron_i)[Ni],
                               VTYPE (&neuron_n)[Nn]) {
-  int tid = blockIdx.x * blockDim.x + threadIdx.x;
-
+  int n = blockIdx.x * 1024 + threadIdx.x;
+  int ii = blockIdx.y * 64;
   VTYPE acc = 0;
-  for (int i = 0; i < Ni; i++) {
-    acc += synapse[tid][i] * neuron_i[i];
-  }
-  acc = (acc > 0) ? acc : acc / 4;
-  neuron_n[tid] = acc;
 
+  __shared__ VTYPE neuron_i_local[64];
+
+  if (threadIdx.x < 64)
+    neuron_i_local[threadIdx.x] = neuron_i[ii + threadIdx.x];
+
+  __syncthreads();
+
+  for (int i = 0; i < 64; i++) {
+    acc += synapse[n][ii + i] * neuron_i_local[i];
+  }
+  
+  atomicAdd(&(neuron_n[n]), acc);
+}
+
+__global__ void leaky_relu_kernel(VTYPE (&neuron_n)[Nn]) {
+  int n = blockIdx.x * blockDim.x + threadIdx.x;
+  neuron_n[n] = (neuron_n[n] > 0) ? neuron_n[n] : neuron_n[n] / 4;
 }
 
 void classifier_layer_cuda(VTYPE (&synapse)[Nn][Ni], VTYPE (&neuron_i)[Ni],
                               VTYPE (&neuron_n)[Nn]) {
-  classifier_layer_kernel<<<Nn / 1024, 1024>>>(synapse, neuron_i, neuron_n);
+  dim3 blocks(Nn / 1024, Ni / 64);
+  dim3 threads(1024);
+  classifier_layer_kernel<<<blocks, threads>>>(synapse, neuron_i, neuron_n);
+  cudaDeviceSynchronize();
+  leaky_relu_kernel<<<Nn / 1024, 1024>>>(neuron_n);
   cudaDeviceSynchronize();
 }
 
@@ -114,7 +130,7 @@ int main(int argc, char** argv) {
   }
 
   for (int i = 0; i < Nn; i++) {
-    (*neuron_n_cuda)[i] = neuron_n[i];
+    (*neuron_n_cuda)[i] = 0;
   }
 
   for (int i = 0; i < Nn; i++) {
@@ -140,6 +156,12 @@ int main(int argc, char** argv) {
   compare(neuron_n, neuron_n2, Nn);
 
   // CUDA implemetation
+  int device = -1;
+  cudaGetDevice(&device);
+
+  cudaMemPrefetchAsync(synapse_cuda, Ni*Nn*sizeof(float), device, NULL);
+  cudaMemPrefetchAsync(neuron_i_cuda, Ni*sizeof(float), device, NULL);
+  cudaMemPrefetchAsync(neuron_n_cuda, Nn*sizeof(float), device, NULL);
   begin_roi();
   classifier_layer_cuda(*synapse_cuda, *neuron_i_cuda, *neuron_n_cuda);
   end_roi();
