@@ -76,31 +76,23 @@ void classifier_layer_blocked(VTYPE (&synapse)[Nn][Ni], VTYPE (&neuron_i)[Ni],
   }
 }
 
-__global__ void classifier_layer_kernel(VTYPE *synapse, VTYPE *neuron_i, VTYPE *neuron_n) {
-  int bx = blockIdx.x;
-  int tx = threadIdx.x;
+__global__ void classifier_layer_kernel(VTYPE (&synapse)[Nn][Ni], VTYPE (&neuron_i)[Ni],
+                              VTYPE (&neuron_n)[Nn]) {
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-  __shared__ VTYPE neuron_i_tile[Tii];
-
-  float acc = 0;
-
-  for (int ii = 0; ii < Ni; ii += Tii) {
-    
-    for (int i = 0; i < Tii / Tnn; i++) {
-      neuron_i_tile[tx * Tii / Tnn + i] = neuron_i[ii + (tx * Tii / Tnn + i)];
-    }    
-    __syncthreads();
-
-    for (int i = 0; i < Tii; i++) {
-      acc += neuron_i_tile[i] * synapse[bx * Tnn + tx][ii + i];
-    }
+  VTYPE acc = 0;
+  for (int i = 0; i < Ni; i++) {
+    acc += synapse[tid][i] * neuron_i[i];
   }
+  acc = (acc > 0) ? acc : acc / 4;
+  neuron_n[tid] = acc;
 
-  neuron_n[bx * Tnn + tx] = acc;
 }
 
-void clssifier_layer_cuda(VTYPE *synapse, VTYPE *neuron_i, VTYPE *neuron_n) {
-  classifier_layer_kernel<<<Nn / Tnn, Tnn>>>(synapse, neuron_i, neuron_n);
+void classifier_layer_cuda(VTYPE (&synapse)[Nn][Ni], VTYPE (&neuron_i)[Ni],
+                              VTYPE (&neuron_n)[Nn]) {
+  classifier_layer_kernel<<<Nn / 1024, 1024>>>(synapse, neuron_i, neuron_n);
+  cudaDeviceSynchronize();
 }
 
 int main(int argc, char** argv) {
@@ -118,16 +110,16 @@ int main(int argc, char** argv) {
   cudaMallocManaged(&synapse_cuda, sizeof(VTYPE) * Nn * Ni);
 
   for (int i = 0; i < Ni; i++) {
-    neuron_i_cuda = neuron_i[i];
+    (*neuron_i_cuda)[i] = neuron_i[i];
   }
 
   for (int i = 0; i < Nn; i++) {
-    neuron_n_cuda = neuron_n[i]
+    (*neuron_n_cuda)[i] = neuron_n[i];
   }
 
   for (int i = 0; i < Nn; i++) {
     for (int j = 0; j < Ni; j++) {
-      synapse_cuda[i][j] = synapse[i][j]
+      (*synapse_cuda)[i][j] = synapse[i][j];
     }
   }
 
@@ -149,12 +141,12 @@ int main(int argc, char** argv) {
 
   // CUDA implemetation
   begin_roi();
-  clssifier_layer_cuda(synapse_cuda, neuron_i_cuda, neuron_n_cuda);
+  classifier_layer_cuda(*synapse_cuda, *neuron_i_cuda, *neuron_n_cuda);
   end_roi();
 
-  cout << "blocked computation complete!\n";
+  cout << "cuda computation complete!\n";
 
-  compare(neuron_n, neuron_n_cuda, Nn);
+  compare(neuron_n, *neuron_n_cuda, Nn);
 
   cout << "done\n";
 }
