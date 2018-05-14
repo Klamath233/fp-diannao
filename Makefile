@@ -1,5 +1,5 @@
 CPP=nvcc
-CFLAGS=$(OPT) -O3
+CFLAGS=$(OPT) -O3 -lineinfo
 MODULE          := conv1 conv2 class1 class2
 
 .PHONY: all clean

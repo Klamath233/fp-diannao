@@ -76,7 +76,7 @@ void classifier_layer_blocked(VTYPE (&synapse)[Nn][Ni], VTYPE (&neuron_i)[Ni],
   }
 }
 
-__global__ void classifier_layer_kernel(VTYPE (&synapse)[Nn][Ni], VTYPE (&neuron_i)[Ni],
+__global__ void classifier_layer_kernel(VTYPE (&synapse)[Ni][Nn], VTYPE (&neuron_i)[Ni],
                               VTYPE (&neuron_n)[Nn]) {
   int n = blockIdx.x * 1024 + threadIdx.x;
   int ii = blockIdx.y * 64;
@@ -90,7 +90,7 @@ __global__ void classifier_layer_kernel(VTYPE (&synapse)[Nn][Ni], VTYPE (&neuron
   __syncthreads();
 
   for (int i = 0; i < 64; i++) {
-    acc += synapse[n][ii + i] * neuron_i_local[i];
+    acc += synapse[ii + i][n] * neuron_i_local[i];
   }
   
   atomicAdd(&(neuron_n[n]), acc);
@@ -101,7 +101,7 @@ __global__ void leaky_relu_kernel(VTYPE (&neuron_n)[Nn]) {
   neuron_n[n] = (neuron_n[n] > 0) ? neuron_n[n] : neuron_n[n] / 4;
 }
 
-void classifier_layer_cuda(VTYPE (&synapse)[Nn][Ni], VTYPE (&neuron_i)[Ni],
+void classifier_layer_cuda(VTYPE (&synapse)[Ni][Nn], VTYPE (&neuron_i)[Ni],
                               VTYPE (&neuron_n)[Nn]) {
   dim3 blocks(Nn / 1024, Ni / 64);
   dim3 threads(1024);
@@ -119,7 +119,7 @@ int main(int argc, char** argv) {
   // Copy the data from the global buffers to the CUDA managed buffers.
   VTYPE (*neuron_i_cuda)[Ni];
   VTYPE (*neuron_n_cuda)[Nn];
-  VTYPE (*synapse_cuda)[Nn][Ni];
+  VTYPE (*synapse_cuda)[Ni][Nn];
 
   cudaMallocManaged(&neuron_i_cuda, sizeof(VTYPE) * Ni);
   cudaMallocManaged(&neuron_n_cuda, sizeof(VTYPE) * Nn);
@@ -135,7 +135,7 @@ int main(int argc, char** argv) {
 
   for (int i = 0; i < Nn; i++) {
     for (int j = 0; j < Ni; j++) {
-      (*synapse_cuda)[i][j] = synapse[i][j];
+      (*synapse_cuda)[j][i] = synapse[i][j];
     }
   }
 
