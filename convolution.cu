@@ -144,28 +144,28 @@ void  convolution_layer(VTYPE (&synapse)[Ky][Kx][Nn][Ni],
   }
 }
 
-__global__ void convolution_layer_CUDA(VTYPE(&synapse)[Ky][Kx][Nn][Ni],
-					   VTYPE(&neuron_i)[NYPAD][NXPAD][Ni],
-					   VTYPE(&neuron_n)[NYSCL][NXSCL][Nn])
+__global__ void convolution_layer_CUDA(VTYPE(&synapse)[Nn][Ni][Ky][Kx],
+					   VTYPE(&neuron_i)[Ni][NYPAD][NXPAD],
+					   VTYPE(&neuron_n)[Nn][NYSCL][NXSCL])
 {
 	if (blockIdx.x * 1024 + threadIdx.x < (Ny*Nx))
 	{
 		int index_x = ((blockIdx.x * 1024) + threadIdx.x) % Nx;
-		int index_y = ((blockIdx.x * 1024) + threadIdx.x) / Ny;
+		int index_y = ((blockIdx.x * 1024) + threadIdx.x) / Nx;
 		for (int n=0; n<Nn; n++)
 		{
 			VTYPE acc = 0;
-			for (int x = index_x; x < index_x+3; x++)
+			for (int y = index_y; y < index_y+3; y++)
 			{
-				for (int y = index_y; y < index_y+3; y++)
+				for (int x = index_x; x < index_x+3; x++)
 				{
 					for (int z = 0; z<Ni; z++)
 					{
-						acc += neuron_i[y][x][z] * synapse[y - index_y][x - index_x][n][z];
+						acc += neuron_i[z][y][x] * synapse[n][z][y - index_y][x - index_x];
 					}
 				}
 			}
-			neuron_n[index_y][index_x][n] = (acc < 0) ? (acc / 4) : acc;
+			neuron_n[n][index_y][index_x] = (acc < 0) ? (acc / 4) : acc;
 		}
 	}
 }
@@ -182,9 +182,10 @@ int main(const int argc, const char** argv) {
   neuron_n2 = (VTYPE (*)[NYSCL][NXSCL][Nn])aligned_malloc(64, NYSCL * NXSCL * Nn * sizeof(VTYPE));
 
   // Copy the data from the global buffers to the CUDA managed buffers.
-  VTYPE(*neuron_i_cuda)[NYPAD][NXPAD][Ni];
-  VTYPE(*neuron_n_cuda)[NYSCL][NXSCL][Nn];
-  VTYPE(*synapse_cuda)[Ky][Kx][Nn][Ni];
+  VTYPE(*neuron_i_cuda)[Ni][NYPAD][NXPAD];
+  VTYPE(*neuron_n_cuda)[Nn][NYSCL][NXSCL];
+  VTYPE(*neuron_n_cuda_reset)[NYSCL][NXSCL][Nn] = (VTYPE (*)[NYSCL][NXSCL][Nn])aligned_malloc(64, NYSCL * NXSCL * Nn * sizeof(VTYPE));
+  VTYPE(*synapse_cuda)[Nn][Ni][Ky][Kx];
 
   cudaMallocManaged(&neuron_i_cuda, NYPAD * NXPAD * Ni * sizeof(VTYPE));
   cudaMallocManaged(&neuron_n_cuda, NYSCL * NXSCL * Nn * sizeof(VTYPE));
@@ -200,7 +201,7 @@ int main(const int argc, const char** argv) {
 	  {
 		  for (int k = 0; k < Ni; k++)
 		  {
-			  (*neuron_i_cuda)[i][j][k] = (*neuron_i)[i][j][k];
+			  (*neuron_i_cuda)[k][i][j] = (*neuron_i)[i][j][k];
 		  }
 	  }
   }
@@ -213,7 +214,7 @@ int main(const int argc, const char** argv) {
 		  {
 			  for (int l = 0; l < Nn; l++)
 			  {
-				  (*synapse_cuda)[i][j][k][l] = (*synapse)[i][j][k][l];
+				  (*synapse_cuda)[k][l][i][j] = (*synapse)[i][j][k][l];
 			  }
 		  }
 	  }
@@ -247,8 +248,19 @@ int main(const int argc, const char** argv) {
   cudaDeviceSynchronize();
   end_roi();
 
+  for(int i=0; i<NYSCL; i++)
+  {
+    for (int j = 0; j < NXSCL; j++)
+    {
+      for (int k = 0; k < Nn; k++)
+      {
+        (*neuron_n_cuda_reset)[i][j][k] = (*neuron_n_cuda)[k][i][j];
+      }
+    }
+  }
+
   cout << "CUDA version complete!\n";
-  compare((VTYPE*)*neuron_n, (VTYPE*)*neuron_n_cuda, NYSCL * NXSCL * Nn);
+  compare((VTYPE*)*neuron_n, (VTYPE*)*neuron_n_cuda_reset, NYSCL * NXSCL * Nn);
 
   cudaFree(neuron_i_cuda);
   cudaFree(synapse_cuda);
