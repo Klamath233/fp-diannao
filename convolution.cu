@@ -20,8 +20,8 @@ using namespace std;
 #define Tx  8
 #endif
 
-#define NYPAD (Ny+Ky)
-#define NXPAD (Nx+Kx)
+#define NYPAD (Ny+Ky-1)
+#define NXPAD (Nx+Kx-1)
 
 #define NYSCL (Ny/Sy)
 #define NXSCL (Nx/Sx)
@@ -144,6 +144,32 @@ void  convolution_layer(VTYPE (&synapse)[Ky][Kx][Nn][Ni],
   }
 }
 
+__global__ void convolution_layer_CUDA(VTYPE(&synapse)[Ky][Kx][Nn][Ni],
+					   VTYPE(&neuron_i)[NYPAD][NXPAD][Ni],
+					   VTYPE(&neuron_n)[NYSCL][NXSCL][Nn])
+{
+	if (blockIdx.x * 1024 + threadIdx.x < (Ny*Nx))
+	{
+		int index_x = ((blockIdx.x * 1024) + threadIdx.x) % Nx;
+		int index_y = ((blockIdx.x * 1024) + threadIdx.x) / Ny;
+		for (int n=0; n<Nn; n++)
+		{
+			VTYPE acc = 0;
+			for (int x = index_x; x < index_x+3; x++)
+			{
+				for (int y = index_y; y < index_y+3; y++)
+				{
+					for (int z = 0; z<Ni; z++)
+					{
+						acc += neuron_i[y][x][z] * synapse[y - index_y][x - index_x][n][z];
+					}
+				}
+			}
+			neuron_n[index_y][index_x][n] = (acc < 0) ? (acc / 4) : acc;
+		}
+	}
+}
+
 
 
 
@@ -154,11 +180,46 @@ int main(const int argc, const char** argv) {
   neuron_i  = (VTYPE (*)[NYPAD][NXPAD][Ni])aligned_malloc(64, NYPAD * NXPAD * Ni * sizeof(VTYPE));
   neuron_n  = (VTYPE (*)[NYSCL][NXSCL][Nn])aligned_malloc(64, NYSCL * NXSCL * Nn * sizeof(VTYPE));
   neuron_n2 = (VTYPE (*)[NYSCL][NXSCL][Nn])aligned_malloc(64, NYSCL * NXSCL * Nn * sizeof(VTYPE));
-  neuron_cuda = (VTYPE (*)[NYSCL][NXSCL][Nn])aligned_malloc(64, NYSCL * NXSCL * Nn * sizeof(VTYPE));
+
+  // Copy the data from the global buffers to the CUDA managed buffers.
+  VTYPE(*neuron_i_cuda)[NYPAD][NXPAD][Ni];
+  VTYPE(*neuron_n_cuda)[NYSCL][NXSCL][Nn];
+  VTYPE(*synapse_cuda)[Ky][Kx][Nn][Ni];
+
+  cudaMallocManaged(&neuron_i_cuda, NYPAD * NXPAD * Ni * sizeof(VTYPE));
+  cudaMallocManaged(&neuron_n_cuda, NYSCL * NXSCL * Nn * sizeof(VTYPE));
+  cudaMallocManaged(&synapse_cuda, SYNAPSE_SIZE * sizeof(VTYPE));
 
   cout << "initializing arrays\n";
 
   fill_convolution_shared_simple(*synapse, *neuron_i);
+
+  for(int i=0; i<NYPAD; i++)
+  {
+	  for (int j = 0; j < NXPAD; j++)
+	  {
+		  for (int k = 0; k < Ni; k++)
+		  {
+			  (*neuron_i_cuda)[i][j][k] = (*neuron_i)[i][j][k];
+		  }
+	  }
+  }
+
+  for (int i = 0; i<Ky; i++)
+  {
+	  for (int j = 0; j < Kx; j++)
+	  {
+		  for (int k = 0; k < Ni; k++)
+		  {
+			  for (int l = 0; l < Nn; l++)
+			  {
+				  (*synapse_cuda)[i][j][k][l] = (*synapse)[i][j][k][l];
+			  }
+		  }
+	  }
+  }
+  //cudaMemcpy(neuron_i_cuda, &neuron_i, sizeof(VTYPE), cudaMemcpyHostToDevice);
+  //cudaMemcpy(synapse_cuda, &synapse, sizeof(VTYPE), cudaMemcpyHostToDevice);
 
   cout << "starting computation\n";
 
@@ -182,11 +243,16 @@ int main(const int argc, const char** argv) {
   //Cuda version
   begin_roi();
   //TODO: Add cuda implementation of the layer.
+  convolution_layer_CUDA <<<(222*222/1024+1), 1024>>> (*synapse_cuda, *neuron_i_cuda, *neuron_n_cuda);
+  cudaDeviceSynchronize();
   end_roi();
 
   cout << "CUDA version complete!\n";
-  compare((VTYPE*)*neuron_n, (VTYPE*)*neuron_cuda, NYSCL * NXSCL * Nn);
+  compare((VTYPE*)*neuron_n, (VTYPE*)*neuron_n_cuda, NYSCL * NXSCL * Nn);
 
+  cudaFree(neuron_i_cuda);
+  cudaFree(synapse_cuda);
+  cudaFree(neuron_n_cuda);
 
   cout << "done\n";
 }
